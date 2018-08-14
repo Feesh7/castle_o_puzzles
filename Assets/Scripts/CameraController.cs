@@ -38,6 +38,7 @@ public class CameraController : MonoBehaviour {
     private Vector2 idleOrientation = Vector2.zero;
     private CameraMovementFunction handleCameraMove;
     private CameraMovementFunction handlePlayerRotate;
+    private Vector3 clamped_follow_distance;
 
     // Utils
     private Utilities utils;
@@ -82,6 +83,7 @@ public class CameraController : MonoBehaviour {
         SetThirdPersonActionVars(player_home);
         opaque_material = home.GetComponentInChildren<SkinnedMeshRenderer>().material;
         original_model = home.GetComponentInChildren<SkinnedMeshRenderer>().sharedMesh;
+        clamped_follow_distance = target_follow_distance;
         // TODO: Move this mouse hiding logic somewhere else
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
@@ -287,12 +289,17 @@ public class CameraController : MonoBehaviour {
 
     private void FollowPlayerVelocity()
     {
-        Vector3 player_ground_vel = Vector3.ProjectOnPlane(current_player.cc.velocity, current_player.transform.up);
+        /*Vector3 player_ground_vel = Vector3.ProjectOnPlane(current_player.cc.velocity, current_player.transform.up);
         if (player_ground_vel.normalized != Vector3.zero)
         {
             Quaternion velocity_angle = Quaternion.LookRotation(player_ground_vel.normalized, current_player.transform.up);
             idleOrientation = EulerToMouseAccum(velocity_angle.eulerAngles);
+        }*/
+        if (current_player.OnGround() && utils.CheckTimer(IDLE_TIMER))
+        {
+            idleOrientation.x += input_manager.GetMoveHorizontal()*0.6f;
         }
+        idleOrientation.y = 0;
     }
 
     private Vector2 EulerToMouseAccum(Vector3 euler_angle)
@@ -307,19 +314,19 @@ public class CameraController : MonoBehaviour {
     {
         RaycastHit hit;
         Vector3 startpos = current_player.transform.position;
-        Vector3 world_target_vec = transform.TransformVector(Quaternion.Inverse(transform.localRotation) * target_follow_distance);
+        Vector3 world_target_vec = transform.TransformVector(Quaternion.Inverse(transform.localRotation) * clamped_follow_distance);
         Vector3 path = (yaw_pivot.transform.position + world_target_vec - startpos);
         //Debug.DrawRay(startpos, path.normalized*(path.magnitude+1f), Color.green);
         
-        if (Physics.Raycast(startpos, path.normalized, out hit, path.magnitude + 1f))
+        if (Physics.Raycast(startpos, path.normalized, out hit, path.magnitude + 0.1f))
         {
             WallHitTimeDelta = 0;
             Vector3 pivot_hit = (hit.point - yaw_pivot.transform.position);
             // Ignore hits that are too far away
-            if (pivot_hit.magnitude > target_follow_distance.magnitude + 1f)
+            if (pivot_hit.magnitude > clamped_follow_distance.magnitude + 0.1f)
             {
                 //Debug.Log("Too far hit");
-                transform.localPosition = Vector3.Lerp(transform.localPosition, target_follow_distance, 0.1f);
+                transform.localPosition = Vector3.Lerp(transform.localPosition, clamped_follow_distance, 0.1f);
             }
             // Very close hits should move the camera to a predefined location
             else if (hit.distance < 1f)
@@ -327,25 +334,25 @@ public class CameraController : MonoBehaviour {
                 //Debug.Log("Too close hit");
                 if (pitch_pivot.transform.localRotation.x < 0)
                 {
-                    transform.localPosition = Vector3.Lerp(transform.localPosition, (Quaternion.Inverse(pitch_pivot.transform.localRotation) * Vector3.up * target_follow_distance.y), 0.1f);
+                    transform.localPosition = Vector3.Lerp(transform.localPosition, (Quaternion.Inverse(pitch_pivot.transform.localRotation) * Vector3.up * clamped_follow_distance.y), 0.1f);
                 }
                 else
                 {
-                    transform.localPosition = Vector3.Lerp(transform.localPosition, (Vector3.up * target_follow_distance.y), 0.1f);
+                    transform.localPosition = Vector3.Lerp(transform.localPosition, (Vector3.up * clamped_follow_distance.y), 0.1f);
                 }
             }
-            // Otherwise move the camrea to where the hit is, minus an offset
+            // Otherwise move the camera to where the hit is, minus an offset
             else
             {
                 //Debug.Log("Wall hit");
                 float horizontal_displacement = Vector3.Dot(pivot_hit, pitch_pivot.transform.forward);
                 if (pitch_pivot.transform.localRotation.x < 0)
                 {
-                    transform.localPosition = (Mathf.Sign(horizontal_displacement) * (Mathf.Abs(horizontal_displacement) - 1f) * Vector3.forward) + (Quaternion.Inverse(pitch_pivot.transform.localRotation) * Vector3.up * target_follow_distance.y);
+                    transform.localPosition = (Mathf.Sign(horizontal_displacement) * (Mathf.Abs(horizontal_displacement) - 1f) * Vector3.forward) + (Quaternion.Inverse(pitch_pivot.transform.localRotation) * Vector3.up * clamped_follow_distance.y);
                 }
                 else
                 {
-                    transform.localPosition = (Mathf.Sign(horizontal_displacement) * (Mathf.Abs(horizontal_displacement) - 1f) * Vector3.forward) + (Vector3.up * target_follow_distance.y);
+                    transform.localPosition = (Mathf.Sign(horizontal_displacement) * (Mathf.Abs(horizontal_displacement) - 1f) * Vector3.forward) + (Vector3.up * clamped_follow_distance.y);
                 }
                 transform.localPosition += transform.InverseTransformDirection(hit.normal) * controlled_camera.rect.width / 2;
             }
@@ -353,7 +360,21 @@ public class CameraController : MonoBehaviour {
         else
         {
             //Debug.Log("No hit");
-            transform.localPosition = Vector3.Lerp(transform.localPosition, target_follow_distance, 0.1f);
+            Vector3 mypos = transform.localPosition;
+            if (transform.localPosition.z >= target_follow_distance.z && transform.localPosition.z <= target_follow_distance.z * 0.7f)
+            {
+                mypos.z -= 0.5f*Vector3.Dot(current_player.cc.velocity, yaw_pivot.transform.forward) * Time.deltaTime;
+            }
+            else if (transform.localPosition.z < target_follow_distance.z)
+            {
+                mypos.z = target_follow_distance.z;
+            }
+            else if (transform.localPosition.z > target_follow_distance.z * 0.7f)
+            {
+                mypos.z = target_follow_distance.z * 0.701f;
+            }
+            mypos.y = Mathf.Lerp(mypos.y, target_follow_distance.y, 0.1f);
+            transform.localPosition = clamped_follow_distance = mypos;
         }
     }
 
@@ -423,7 +444,8 @@ public class CameraController : MonoBehaviour {
         {
             current_player.transform.forward = Vector3.RotateTowards(current_player.transform.forward, desired_move, 0.1f * interp_multiplier, 1f);
         }
-        yaw_pivot.transform.position = Vector3.Lerp(yaw_pivot.transform.position, current_player.transform.position, 0.025f);
+        //yaw_pivot.transform.position = Vector3.Lerp(yaw_pivot.transform.position, current_player.transform.position, 0.025f);
+        yaw_pivot.transform.position = current_player.transform.position;
         AvoidWalls();
         if (utils.CheckTimer(IDLE_TIMER))
         {
@@ -441,7 +463,9 @@ public class CameraController : MonoBehaviour {
         {
             Vector3 player_ground_vel = Vector3.ProjectOnPlane(current_player.cc.velocity, current_player.transform.up);
             float lerp_factor = Mathf.Max(player_ground_vel.magnitude / current_player.RunSpeed, 0.2f);
-            mouseAccumulator.x = Mathf.LerpAngle(mouseAccumulator.x, idleOrientation.x, 0.005f * lerp_factor);
+            /*mouseAccumulator.x = Mathf.LerpAngle(mouseAccumulator.x, idleOrientation.x, 0.005f * lerp_factor);
+            mouseAccumulator.y = Mathf.LerpAngle(mouseAccumulator.y, idleOrientation.y, 0.005f * lerp_factor);*/
+            mouseAccumulator.x = Mathf.LerpAngle(mouseAccumulator.x, idleOrientation.x, 1f);
             mouseAccumulator.y = Mathf.LerpAngle(mouseAccumulator.y, idleOrientation.y, 0.005f * lerp_factor);
         }
         else
