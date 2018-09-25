@@ -1,0 +1,3 @@
+[submodule "Assets/MappingResources"]
+	path = Assets/MappingResources
+	url = git@github.com:MadeMadeDane/MappingResources.git
